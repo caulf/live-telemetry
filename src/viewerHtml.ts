@@ -1,254 +1,227 @@
+function escapeHtmlTS(str: string): string {
+  return str.replace(/[&<>"']/g, (m) => {
+    switch (m) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case "\"": return "&quot;";
+      case "'": return "&#39;";
+      default: return m;
+    }
+  });
+}
+
 export function renderViewerHtml(sessionId: string, wsBaseUrl: string): string {
-	// wsBaseUrl example: "wss://live-telemetry.hjcaulfield99.workers.dev"
-	// sessionId example: "demo-session"
-	return `<!doctype html>
+  const safeSessionId = escapeHtmlTS(sessionId);
+
+  return `<!doctype html>
 <html lang="en">
 <head>
-	<meta charset="utf-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<title>Live Telemetry Viewer</title>
-	<style>
-		body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
-		.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-		.card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin-top: 12px; }
-		.kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 10px; }
-		.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eee; }
-		canvas { width: 100%; height: 260px; border: 1px solid #ddd; border-radius: 10px; background: #fff; }
-		.small { color: #555; font-size: 0.9em; }
-		.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-	</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live Telemetry Viewer</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin-top: 12px; }
+    .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 10px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eee; }
+    canvas { width: 100%; height: 260px; border: 1px solid #ddd; border-radius: 10px; background: #fff; }
+    .small { color: #555; font-size: 0.9em; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  </style>
 </head>
 <body>
-	<h1>Live Telemetry Viewer</h1>
+  <h1>Live Telemetry Viewer</h1>
 
-	<div class="card">
-		<div class="kv">
-			<div><strong>Session</strong></div><div class="mono">${escapeHtml(sessionId)}</div>
-			<div><strong>Status</strong></div><div><span id="status" class="badge">connecting</span></div>
-			<div><strong>Latest GPS UTC</strong></div><div class="mono" id="latestTime">—</div>
-			<div><strong>Latest seq</strong></div><div class="mono" id="latestSeq">—</div>
-			<div><strong>Viewer settings</strong></div>
-			<div class="small">
-				Window: 30s • Playout delay: 0.7s • Charts: Accel (m/s²) & Gyro (rad/s)
-			</div>
-		</div>
-	</div>
+  <div class="card">
+    <div class="kv">
+      <div><strong>Session</strong></div><div class="mono">${safeSessionId}</div>
+      <div><strong>Status</strong></div><div><span id="status" class="badge">connecting</span></div>
+      <div><strong>Latest GPS UTC</strong></div><div class="mono" id="latestTime">—</div>
+      <div><strong>Latest seq</strong></div><div class="mono" id="latestSeq">—</div>
+      <div><strong>Viewer settings</strong></div>
+      <div class="small">Window: 30s • Playout delay: 0.7s • Charts: Accel (m/s²) & Gyro (rad/s)</div>
+    </div>
+  </div>
 
-	<div class="card">
-		<h2>Acceleration (m/s²)</h2>
-		<canvas id="accelCanvas" width="1200" height="300"></canvas>
-		<div class="small">Ax, Ay, Az vs time (last 30 seconds, displayed with 0.7s delay)</div>
-	</div>
+  <div class="card">
+    <h2>Acceleration (m/s²)</h2>
+    <canvas id="accelCanvas" width="1200" height="300"></canvas>
+    <div class="small">Ax, Ay, Az vs time (last 30 seconds, displayed with 0.7s delay)</div>
+  </div>
 
-	<div class="card">
-		<h2>Gyroscope (rad/s)</h2>
-		<canvas id="gyroCanvas" width="1200" height="300"></canvas>
-		<div class="small">Gx, Gy, Gz vs time (last 30 seconds, displayed with 0.7s delay)</div>
-	</div>
+  <div class="card">
+    <h2>Gyroscope (rad/s)</h2>
+    <canvas id="gyroCanvas" width="1200" height="300"></canvas>
+    <div class="small">Gx, Gy, Gz vs time (last 30 seconds, displayed with 0.7s delay)</div>
+  </div>
 
-	<script>
-		// -------- Fixed parameters (do not change) ----------
-		const SESSION_ID = ${JSON.stringify(sessionId)};
-		const WS_URL = ${JSON.stringify(wsBaseUrl)} + "/live/" + encodeURIComponent(SESSION_ID);
-		const WINDOW_MS = 30000;
-		const PLAYOUT_DELAY_MS = 700;
+  <script>
+    // Fixed parameters
+    const SESSION_ID = ${JSON.stringify(sessionId)};
+    const WS_URL = ${JSON.stringify(wsBaseUrl)} + "/live/" + encodeURIComponent(SESSION_ID);
+    const WINDOW_MS = 30000;
+    const PLAYOUT_DELAY_MS = 700;
 
-		// -------- Data buffer in browser ----------
-		// Each sample:
-		// { t_gps_utc, seq, accel_mps2:{x,y,z}, gyro_rads:{x,y,z}, t_ms }
-		let buffer = [];
-		let latestReceivedMs = -Infinity;
-		let latestSeq = null;
+    // Buffer: { t_gps_utc, seq, accel_mps2:{x,y,z}, gyro_rads:{x,y,z}, t_ms }
+    let buffer = [];
+    let latestReceivedMs = -Infinity;
+    let latestSeq = null;
 
-		const statusEl = document.getElementById("status");
-		const latestTimeEl = document.getElementById("latestTime");
-		const latestSeqEl = document.getElementById("latestSeq");
+    const statusEl = document.getElementById("status");
+    const latestTimeEl = document.getElementById("latestTime");
+    const latestSeqEl = document.getElementById("latestSeq");
 
-		function setStatus(text) {
-			statusEl.textContent = text;
-		}
+    function setStatus(text) { statusEl.textContent = text; }
 
-		function parseAndAppendSamples(samples) {
-			// Convert samples to internal format and append.
-			for (const s of samples) {
-				const t_ms = Date.parse(s.t_gps_utc);
-				if (!Number.isFinite(t_ms)) continue;
-				buffer.push({ ...s, t_ms });
-				if (t_ms > latestReceivedMs) latestReceivedMs = t_ms;
-				if (typeof s.seq === "number") latestSeq = s.seq;
-			}
+    function parseAndAppendSamples(samples) {
+      for (const s of samples) {
+        const t_ms = Date.parse(s.t_gps_utc);
+        if (!Number.isFinite(t_ms)) continue;
+        buffer.push({ ...s, t_ms });
+        if (t_ms > latestReceivedMs) latestReceivedMs = t_ms;
+        if (typeof s.seq === "number") latestSeq = s.seq;
+      }
 
-			// Keep buffer sorted by time (bursts may arrive slightly out of order)
-			buffer.sort((a, b) => a.t_ms - b.t_ms);
+      buffer.sort((a, b) => a.t_ms - b.t_ms);
 
-			// Prune to last WINDOW_MS based on latestReceivedMs
-			const cutoff = latestReceivedMs - WINDOW_MS;
-			buffer = buffer.filter(s => s.t_ms >= cutoff);
+      const cutoff = latestReceivedMs - WINDOW_MS;
+      buffer = buffer.filter(s => s.t_ms >= cutoff);
 
-			// Update header
-			if (Number.isFinite(latestReceivedMs)) {
-				latestTimeEl.textContent = new Date(latestReceivedMs).toISOString();
-			}
-			if (latestSeq !== null) {
-				latestSeqEl.textContent = String(latestSeq);
-			}
-		}
+      if (Number.isFinite(latestReceivedMs)) {
+        latestTimeEl.textContent = new Date(latestReceivedMs).toISOString();
+      }
+      if (latestSeq !== null) {
+        latestSeqEl.textContent = String(latestSeq);
+      }
+    }
 
-		// -------- WebSocket ----------
-		let ws = null;
-		function connect() {
-			setStatus("connecting");
-			ws = new WebSocket(WS_URL);
+    // WebSocket connect
+    function connect() {
+      setStatus("connecting");
+      const ws = new WebSocket(WS_URL);
 
-			ws.onopen = () => setStatus("connected");
-			ws.onclose = () => { setStatus("disconnected"); setTimeout(connect, 1000); };
-			ws.onerror = () => { setStatus("error"); };
+      ws.onopen = () => setStatus("connected");
+      ws.onclose = () => { setStatus("disconnected"); setTimeout(connect, 1000); };
+      ws.onerror = () => setStatus("error");
 
-			ws.onmessage = (evt) => {
-				let msg;
-				try { msg = JSON.parse(evt.data); } catch { return; }
+      ws.onmessage = (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch { return; }
 
-				if (msg.type === "replay" && Array.isArray(msg.samples)) {
-					parseAndAppendSamples(msg.samples);
-				}
+        if (msg.type === "replay" && Array.isArray(msg.samples)) {
+          parseAndAppendSamples(msg.samples);
+        }
+        if (msg.type === "samples" && Array.isArray(msg.samples)) {
+          parseAndAppendSamples(msg.samples);
+        }
+      };
+    }
+    connect();
 
-				if (msg.type === "samples" && Array.isArray(msg.samples)) {
-					parseAndAppendSamples(msg.samples);
-				}
-			};
-		}
-		connect();
+    // Canvas chart helper
+    function drawChart(canvas, seriesDefs, titleRightText) {
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height;
 
-		// -------- Simple canvas line plotting ----------
-		function drawChart(canvas, seriesDefs, titleRightText) {
-			const ctx = canvas.getContext("2d");
-			const w = canvas.width;
-			const h = canvas.height;
+      const playoutNow = latestReceivedMs - PLAYOUT_DELAY_MS;
+      if (!Number.isFinite(playoutNow)) {
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = "#000";
+        ctx.font = "14px system-ui, sans-serif";
+        ctx.fillText("Waiting for data...", 20, 30);
+        return;
+      }
 
-			// Determine display "now" (playout) time
-			const playoutNow = latestReceivedMs - PLAYOUT_DELAY_MS;
-			if (!Number.isFinite(playoutNow)) {
-				// nothing yet
-				ctx.clearRect(0, 0, w, h);
-				ctx.fillText("Waiting for data...", 20, 30);
-				return;
-			}
+      const tMin = playoutNow - WINDOW_MS;
+      const tMax = playoutNow;
 
-			const tMin = playoutNow - WINDOW_MS;
-			const tMax = playoutNow;
+      const windowSamples = buffer.filter(s => s.t_ms >= tMin && s.t_ms <= tMax);
 
-			// Filter samples in display window
-			const windowSamples = buffer.filter(s => s.t_ms >= tMin && s.t_ms <= tMax);
+      let yMin = Infinity, yMax = -Infinity;
+      for (const s of windowSamples) {
+        for (const def of seriesDefs) {
+          const v = def.getValue(s);
+          if (Number.isFinite(v)) { yMin = Math.min(yMin, v); yMax = Math.max(yMax, v); }
+        }
+      }
 
-			// Find Y range across all series in the window (auto-scale)
-			let yMin = Infinity, yMax = -Infinity;
-			for (const s of windowSamples) {
-				for (const def of seriesDefs) {
-					const v = def.getValue(s);
-					if (Number.isFinite(v)) {
-						if (v < yMin) yMin = v;
-						if (v > yMax) yMax = v;
-					}
-				}
-			}
-			// If no samples, clear
-			ctx.clearRect(0, 0, w, h);
-			if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
-				ctx.fillText("No samples in window...", 20, 30);
-				return;
-			}
+      ctx.clearRect(0, 0, w, h);
+      if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+        ctx.fillStyle = "#000";
+        ctx.font = "14px system-ui, sans-serif";
+        ctx.fillText("No samples in window...", 20, 30);
+        return;
+      }
 
-			// Add some padding
-			const pad = (yMax - yMin) * 0.1 || 1;
-			yMin -= pad; yMax += pad;
+      const pad = (yMax - yMin) * 0.1 || 1;
+      yMin -= pad; yMax += pad;
 
-			// Helpers
-			const xOf = (t) => ((t - tMin) / (tMax - tMin)) * (w - 60) + 50;
-			const yOf = (v) => h - 30 - ((v - yMin) / (yMax - yMin)) * (h - 60);
+      const xOf = (t) => ((t - tMin) / (tMax - tMin)) * (w - 60) + 50;
+      const yOf = (v) => h - 30 - ((v - yMin) / (yMax - yMin)) * (h - 60);
 
-			// Draw axes
-			ctx.clearRect(0, 0, w, h);
-			ctx.strokeStyle = "#999";
-			ctx.lineWidth = 1;
+      // Axes
+      ctx.strokeStyle = "#999";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(50, 20); ctx.lineTo(50, h - 30); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(50, h - 30); ctx.lineTo(w - 10, h - 30); ctx.stroke();
 
-			// Y axis
-			ctx.beginPath();
-			ctx.moveTo(50, 20);
-			ctx.lineTo(50, h - 30);
-			ctx.stroke();
+      // Labels
+      ctx.fillStyle = "#000";
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.fillText(yMax.toFixed(2), 5, 24);
+      ctx.fillText(yMin.toFixed(2), 5, h - 32);
 
-			// X axis
-			ctx.beginPath();
-			ctx.moveTo(50, h - 30);
-			ctx.lineTo(w - 10, h - 30);
-			ctx.stroke();
+      ctx.fillStyle = "#333";
+      ctx.fillText(titleRightText, w - 360, 16);
 
-			// Labels
-			ctx.fillStyle = "#000";
-			ctx.font = "12px system-ui, sans-serif";
-			ctx.fillText(yMax.toFixed(2), 5, 24);
-			ctx.fillText(yMin.toFixed(2), 5, h - 32);
+      // Series
+      for (const def of seriesDefs) {
+        ctx.strokeStyle = def.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let started = false;
+        for (const s of windowSamples) {
+          const v = def.getValue(s);
+          if (!Number.isFinite(v)) continue;
+          const x = xOf(s.t_ms), y = yOf(v);
+          if (!started) { ctx.moveTo(x, y); started = true; }
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
 
-			// Right-side title text
-			ctx.fillStyle = "#333";
-			ctx.fillText(titleRightText, w - 320, 16);
+        ctx.fillStyle = def.color;
+        ctx.fillText(def.label, w - 120, def.legendY);
+      }
+    }
 
-			// Plot each series
-			for (const def of seriesDefs) {
-				ctx.strokeStyle = def.color;
-				ctx.lineWidth = 2;
-				ctx.beginPath();
+    const accelCanvas = document.getElementById("accelCanvas");
+    const gyroCanvas = document.getElementById("gyroCanvas");
 
-				let started = false;
-				for (const s of windowSamples) {
-					const v = def.getValue(s);
-					if (!Number.isFinite(v)) continue;
-					const x = xOf(s.t_ms);
-					const y = yOf(v);
-					if (!started) { ctx.moveTo(x, y); started = true; }
-					else { ctx.lineTo(x, y); }
-				}
-				ctx.stroke();
+    const accelSeries = [
+      { label: "Ax", color: "#d32f2f", legendY: 40, getValue: (s) => s.accel_mps2?.x },
+      { label: "Ay", color: "#1976d2", legendY: 58, getValue: (s) => s.accel_mps2?.y },
+      { label: "Az", color: "#388e3c", legendY: 76, getValue: (s) => s.accel_mps2?.z }
+    ];
 
-				// Legend
-				ctx.fillStyle = def.color;
-				ctx.fillText(def.label, w - 140, def.legendY);
-			}
-		}
+    const gyroSeries = [
+      { label: "Gx", color: "#d32f2f", legendY: 40, getValue: (s) => s.gyro_rads?.x },
+      { label: "Gy", color: "#1976d2", legendY: 58, getValue: (s) => s.gyro_rads?.y },
+      { label: "Gz", color: "#388e3c", legendY: 76, getValue: (s) => s.gyro_rads?.z }
+    ];
 
-		const accelCanvas = document.getElementById("accelCanvas");
-		const gyroCanvas = document.getElementById("gyroCanvas");
+    function loop() {
+      const rightText = Number.isFinite(latestReceivedMs)
+        ? ("Display time: " + new Date(latestReceivedMs - PLAYOUT_DELAY_MS).toISOString())
+        : "Display time: —";
 
-		const accelSeries = [
-			{ label: "Ax", color: "#d32f2f", legendY: 40, getValue: (s) => s.accel_mps2?.x },
-			{ label: "Ay", color: "#1976d2", legendY: 58, getValue: (s) => s.accel_mps2?.y },
-			{ label: "Az", color: "#388e3c", legendY: 76, getValue: (s) => s.accel_mps2?.z }
-		];
+      drawChart(accelCanvas, accelSeries, rightText);
+      drawChart(gyroCanvas, gyroSeries, rightText);
 
-		const gyroSeries = [
-			{ label: "Gx", color: "#d32f2f", legendY: 40, getValue: (s) => s.gyro_rads?.x },
-			{ label: "Gy", color: "#1976d2", legendY: 58, getValue: (s) => s.gyro_rads?.y },
-			{ label: "Gz", color: "#388e3c", legendY: 76, getValue: (s) => s.gyro_rads?.z }
-		];
-
-		function loop() {
-			const rightText = Number.isFinite(latestReceivedMs)
-				? ("Display time: " + new Date(latestReceivedMs - PLAYOUT_DELAY_MS).toISOString())
-				: "Display time: —";
-
-			drawChart(accelCanvas, accelSeries, rightText);
-			drawChart(gyroCanvas, gyroSeries, rightText);
-			requestAnimationFrame(loop);
-		}
-		loop();
-
-		// Minimal HTML escaping for safety in sessionId display
-		function escapeHtml(str) {
-			return String(str).replace(/[&<>"']/g, (m) => ({
-				"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"
-			}[m]));
-		}
-	</script>
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
 </body>
 </html>`;
 }
