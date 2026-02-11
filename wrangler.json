@@ -1,0 +1,16 @@
+{
+	"compatibility_date": "2025-10-08",
+	"main": "src/index.ts",
+	"name": "live-telemetry",
+	"upload_source_maps": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_id": "d158bb02-c012-491d-a74e-c43582c9b360",
+			"database_name": "live-telemetry-db"
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
+}
