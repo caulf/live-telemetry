@@ -1,5 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { renderHtml } from "./renderHtml";
+import { renderViewerHtml } from "./viewerHtml";
+
 
 export interface Env {
   DB: D1Database;
@@ -170,6 +172,19 @@ export default {
       const stub = env.LIVE_ROOMS.getByName(sessionId);
       return stub.fetch("https://do.test/");
     }
+
+    // ✅ Viewer page (HTML): /viewer/<sessionId>
+    if (url.pathname.startsWith("/viewer/")) {
+      const sessionId = url.pathname.split("/")[2] || "demo-session";
+    
+      // Build WebSocket base URL from current host so it works on workers.dev and custom domains.
+      const wsBaseUrl = "wss://" + url.host;
+    
+      return new Response(renderViewerHtml(sessionId, wsBaseUrl), {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+
 
     // ✅ Viewer endpoint: WebSocket
     // GET /live/<sessionId>
